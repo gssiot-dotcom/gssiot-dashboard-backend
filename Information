@@ -1,0 +1,56 @@
+Bu GSS Smart Guard Figma dizayn qilingan Frontend loyihasi uchun yangi Express Server bo'lib, eski GSS Smart Guard loyihasi uchun tayyorlangan Express Serverdan farq qiladi. Bu Server bilan eski Serverni chalkashtirib bo'lmaydi.
+
+=========================== PATTERN RPROMPT =====================================
+Node.js + Express + Mongoose backend uchun men bir xil coding pattern ishlatmoqchiman. Shu patterndan chetga chiqmasdan kod yozib ber.
+
+Mening talab qiladigan arxitektura va usul quyidagicha:
+
+1. Har bir modul alohida bo‘lsin:
+
+- `*.service.js`
+- `*.controller.js`
+- `*.routes.js`
+
+2. Service doim `class` ko‘rinishida yozilsin.
+   Masalan:
+
+- `class UserService`
+- `class AuthService`
+
+3. Service ichida constructor bo‘lsin va model’lar `this` orqali saqlansin.
+   Masalan:
+
+- `this.userSchema = UserSchema`
+- `this.otpSchema = OtpSchema`
+
+4. Service methodlari `static` bo‘lmasin.
+   Oddiy instance method bo‘lsin:
+
+- `async getUsers() {}`
+- `async createUser() {}`
+- `async login() {}`
+
+5. Service faylda class export qilinsin:
+
+- `module.exports = UserService`
+
+6. Controller faylda quyidagi pattern ishlatilsin:
+
+- `let userController = module.exports`
+
+7. Controller ichida service object har method ichida emas, controller tepasida bir marta yaratilishi kerak.
+   Masalan:
+
+- `const UserService = require('./user.service')`
+- `const userService = new UserService()`
+
+8. Controller response formatlari doim bir xil bo‘lsin.
+   Success response:
+
+```js
+{
+  state: 'success',
+  message: '...',
+  data: ...
+}
+```
