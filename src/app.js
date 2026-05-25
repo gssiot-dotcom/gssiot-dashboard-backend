@@ -9,6 +9,7 @@ const app = express()
 // ===== Allowed Origins =====
 const defaultAllowedOrigins = [
 	'https://infogssiot.com',
+	'https://dashboard.infogssiot.com',
 	'http://13.124.202.122',
 	'http://localhost:5173',
 ]
