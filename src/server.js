@@ -26,7 +26,7 @@ const io = new Server(server, {
 	},
 })
 
-// === SocketIO & MQTT connection === //
+// === SocketIO & MQTT connection ==== //
 
 initSocket(io)
 initMqtt()
