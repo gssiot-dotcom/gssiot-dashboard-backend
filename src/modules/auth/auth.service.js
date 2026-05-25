@@ -37,12 +37,14 @@ class AuthService {
 			process.env.COOKIE_SECURE?.toLowerCase() === 'false'
 				? false
 				: isProduction
-		const sameSite = process.env.COOKIE_SAME_SITE || (secureCookie ? 'none' : 'lax')
+		const sameSite =
+			process.env.COOKIE_SAME_SITE || (secureCookie ? 'none' : 'lax')
 
 		res.cookie('access_token', token, {
 			httpOnly: true,
-			secure: secureCookie,
-			sameSite,
+			secure: false,
+			sameSite: 'lax',
+			path: '/',
 			maxAge: 7 * 24 * 60 * 60 * 1000,
 		})
 	}
@@ -53,12 +55,13 @@ class AuthService {
 			process.env.COOKIE_SECURE?.toLowerCase() === 'false'
 				? false
 				: isProduction
-		const sameSite = process.env.COOKIE_SAME_SITE || (secureCookie ? 'none' : 'lax')
+		const sameSite =
+			process.env.COOKIE_SAME_SITE || (secureCookie ? 'none' : 'lax')
 
 		res.clearCookie('access_token', {
 			httpOnly: true,
-			secure: secureCookie,
-			sameSite,
+			secure: false,
+			sameSite: 'lax',
 		})
 	}
 

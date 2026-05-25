@@ -9,10 +9,9 @@ const app = express()
 // ===== Allowed Origins =====
 const defaultAllowedOrigins = [
 	'https://infogssiot.com',
-	'http://13.125.157.133:3001',
-	'http://13.125.157.133',
+	'http://13.124.202.122/',
+	'http://13.124.202.122:3001',
 	'http://localhost:5173',
-	// 'http://192.168.1.102:3005',
 ]
 
 const envAllowedOrigins = (process.env.ALLOWED_ORIGINS || '')
