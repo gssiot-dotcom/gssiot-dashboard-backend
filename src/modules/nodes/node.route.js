@@ -6,7 +6,7 @@ const { isAuth } = require('../../middlewares/auth.middleware')
 const { isAdmin } = require('../../middlewares/admin.middleware')
 
 // ---------------------------------- Node endpoints ----------------------------- //
-// nodeRouter.use(isAuth)
+nodeRouter.use(isAuth)
 
 nodeRouter.post('/', isAdmin, nodeController.createNodes)
 nodeRouter.get('/', isAdmin, nodeController.getNodes)
