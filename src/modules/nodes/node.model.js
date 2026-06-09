@@ -40,15 +40,33 @@ const nodeSchema = new mongoose.Schema(
 			default: 'safe',
 		},
 
-		installedLocation: {
+		installedLocationTitle: {
 			type: String,
 			default: '',
 			trim: true,
 		},
 
-		installLocationImg: {
-			type: String,
-			default: null,
+		installedLocation: {
+			planImageIndex: {
+				type: Number,
+				default: null,
+				min: 0,
+				max: 3,
+			},
+
+			xPercent: {
+				type: Number,
+				default: null,
+				min: 0,
+				max: 100,
+			},
+
+			yPercent: {
+				type: Number,
+				default: null,
+				min: 0,
+				max: 100,
+			},
 		},
 
 		isAssigned: {

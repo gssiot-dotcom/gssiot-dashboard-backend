@@ -94,6 +94,47 @@ const alarmLevelSchema = new mongoose.Schema({
 	red: { type: Number, default: 0 },
 })
 
+const gatewayAlarmNodeSettingSchema = new mongoose.Schema(
+	{
+		alarmEnabled: { type: Boolean, default: false },
+		alarmLevel1: { type: Number, default: null },
+		alarmLevel2: { type: Number, default: null },
+		alarmLevel3: { type: Number, default: null },
+		faultFilterNodes: { type: [Number], default: [] },
+	},
+	{ _id: false },
+)
+
+const gatewayAlarmSettingSchema = new mongoose.Schema(
+	{
+		gatewayId: {
+			type: mongoose.Schema.ObjectId,
+			ref: 'Gateway',
+			required: true,
+			unique: true,
+		},
+		gatewaySerialNum: {
+			type: String,
+			default: null,
+			trim: true,
+		},
+		angle: {
+			type: gatewayAlarmNodeSettingSchema,
+			default: () => ({}),
+		},
+		vertical: {
+			type: gatewayAlarmNodeSettingSchema,
+			default: () => ({}),
+		},
+		updatedBy: {
+			type: mongoose.Schema.ObjectId,
+			ref: 'User',
+			default: null,
+		},
+	},
+	{ timestamps: true },
+)
+
 const buildingMemberSchema = new mongoose.Schema(
 	{
 		companyId: {
@@ -144,9 +185,14 @@ const BuildingAlarmLevelSchema = mongoose.model(
 	'BuildingAlarmLevel',
 	alarmLevelSchema,
 )
+const GatewayAlarmSettingSchema = mongoose.model(
+	'GatewayAlarmSetting',
+	gatewayAlarmSettingSchema,
+)
 
 module.exports = {
 	BuildingSchema,
 	BuildingWorkerSchema,
 	BuildingAlarmLevelSchema,
+	GatewayAlarmSettingSchema,
 }

@@ -783,6 +783,7 @@ class AdminDashboardService {
 
 			status: node.status,
 			installedLocation: node.installedLocation || '',
+			installedLocationTitle: node.installedLocationTitle || '',
 		}
 	}
 

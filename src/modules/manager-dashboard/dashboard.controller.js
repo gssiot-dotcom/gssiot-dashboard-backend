@@ -276,10 +276,13 @@ managerDashboardController.getManagerBuildingNodesPage = async (req, res) => {
 managerDashboardController.updateAlarmLevel = async (req, res, next) => {
 	try {
 		const { buildingId } = req.params
-		const { alarmType, green, yellow, red } = req.body
+		const { alarmType, green, yellow, red, gatewayId, enabled } = req.body
 
 		const alarmLevel = await managerDashboardService.updateBuildingAlarmLevel({
+			userId: req.user._id,
 			buildingId,
+			gatewayId,
+			enabled,
 			alarmType,
 			green,
 			yellow,

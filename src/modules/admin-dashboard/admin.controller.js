@@ -727,11 +727,14 @@ adminDashboardController.getAdminCompanyBuildingNodesPage = async (
 adminDashboardController.updateAlarmLevel = async (req, res, next) => {
 	try {
 		const { buildingId } = req.params
-		const { alarmType, green, yellow, red } = req.body
+		const { alarmType, green, yellow, red, gatewayId, enabled } = req.body
 
 		const alarmLevel =
 			await adminCompanyBuildingsService.updateBuildingAlarmLevel({
+				updatedBy: req.user?._id || null,
 				buildingId,
+				gatewayId,
+				enabled,
 				alarmType,
 				green,
 				yellow,
