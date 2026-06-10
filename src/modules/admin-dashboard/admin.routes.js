@@ -87,6 +87,10 @@ router.patch(
 	'/buildings/:buildingId/alarm-level',
 	adminCompanyController.updateAlarmLevel,
 )
+router.patch(
+	'/buildings/:buildingId/fault-filter',
+	adminCompanyController.updateFaultFilter,
+)
 
 // ================= Admin All Devices page routes ==================
 router.get('/device/gateways', adminCompanyController.getAdminAllGateways)

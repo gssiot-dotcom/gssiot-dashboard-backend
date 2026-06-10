@@ -26,6 +26,6 @@ exports.sendFail = (res, error, defaultMessage = 'Internal server error') => {
 	return res.status(statusCode).json({
 		state: 'fail',
 		message,
-		data: null,
+		data: error.data || null,
 	})
 }

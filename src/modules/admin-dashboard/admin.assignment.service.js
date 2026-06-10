@@ -67,7 +67,7 @@ class AdminCompanyAssignmentsService {
 			this.nodeSchema
 				.find({})
 				.select(
-					'_id number nodeType status installedLocation companyId gatewayId isAssigned',
+					'_id number nodeType status installedLocation installedLocationTitle companyId gatewayId isAssigned',
 				)
 				.sort({ number: 1 })
 				.lean(),

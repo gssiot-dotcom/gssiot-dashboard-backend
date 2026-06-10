@@ -16,11 +16,16 @@ const {
 	BuildingSchema,
 	BuildingWorkerSchema,
 	BuildingAlarmLevelSchema,
+	GatewayAlarmSettingSchema,
 } = require('../building/building.model')
 const GatewaySchema = require('../gateways/gateway.model')
 const NodeSchema = require('../nodes/node.model')
 const { UserSchema } = require('../users/user.model')
 const bcrypt = require('bcryptjs')
+const {
+	sendAlarmLevelToGateways,
+	sendFaultFilterToGateway,
+} = require('../building/alarm-level-mqtt.helper')
 
 class AdminBuildingsService {
 	constructor() {
@@ -32,11 +37,19 @@ class AdminBuildingsService {
 		this.gatewaySchema = GatewaySchema
 		this.nodeSchema = NodeSchema
 		this.alarmLevelSchema = BuildingAlarmLevelSchema
+		this.gatewayAlarmSettingSchema = GatewayAlarmSettingSchema
 	}
 
-	createError(status, message) {
+	createError(statusOrMessage, maybeMessage) {
+		const statusCode =
+			typeof statusOrMessage === 'number'
+				? statusOrMessage
+				: maybeMessage || 400
+		const message =
+			typeof statusOrMessage === 'number' ? maybeMessage : statusOrMessage
 		const error = new Error(message)
-		error.status = status
+		error.status = statusCode
+		error.statusCode = statusCode
 		return error
 	}
 
@@ -837,22 +850,31 @@ class AdminBuildingsService {
 
 		const gatewayIds = gatewayList.map(gateway => gateway._id)
 
-		const nodesList = gatewayIds.length
-			? await this.nodeSchema
-					.find({
-						companyId: targetCompanyId,
-						gatewayId: { $in: gatewayIds },
-						nodeType,
-						isAssigned: true,
-					})
-					.populate('gatewayId', 'serialNumber gatewayType gatewayStatus')
-					.sort({ number: 1 })
-					.lean()
-			: []
+		const [nodesList, gatewayAlarmSettings] = await Promise.all([
+			gatewayIds.length
+				? this.nodeSchema
+						.find({
+							companyId: targetCompanyId,
+							gatewayId: { $in: gatewayIds },
+							nodeType,
+							isAssigned: true,
+						})
+						.populate('gatewayId', 'serialNumber gatewayType gatewayStatus')
+						.sort({ number: 1 })
+						.lean()
+				: [],
+
+			gatewayIds.length
+				? this.gatewayAlarmSettingSchema
+						.find({ gatewayId: { $in: gatewayIds } })
+						.lean()
+				: [],
+		])
 
 		return {
 			nodesList,
 			gatewayList,
+			gatewayAlarmSettings,
 			buildingAlarmLevel: buildingAlarmLevel || {
 				buildingId: targetBuildingId,
 				alarmType: nodeType,
@@ -864,7 +886,14 @@ class AdminBuildingsService {
 		}
 	}
 
-	validateAlarmLevelPayload({ buildingId, alarmType, green, yellow, red }) {
+	validateAlarmLevelPayload({
+		buildingId,
+		alarmType,
+		green,
+		yellow,
+		red,
+		enabled = true,
+	}) {
 		if (!mongoose.Types.ObjectId.isValid(buildingId)) {
 			throw this.createError('Invalid building id', 400)
 		}
@@ -876,6 +905,8 @@ class AdminBuildingsService {
 		if (!Object.values(ALARM_NODE_TYPES).includes(alarmType)) {
 			throw this.createError('Invalid alarm type', 400)
 		}
+
+		if (enabled === false) return
 
 		const values = { green, yellow, red }
 		const ALARM_MAX_DEGREE = 12
@@ -906,7 +937,10 @@ class AdminBuildingsService {
 	}
 
 	async updateBuildingAlarmLevel({
+		updatedBy = null,
 		buildingId,
+		gatewayId = null,
+		enabled = true,
 		alarmType,
 		green,
 		yellow,
@@ -918,22 +952,318 @@ class AdminBuildingsService {
 			green,
 			yellow,
 			red,
+			enabled,
 		})
 
-		const alarmLevel = await this.alarmLevelSchema.findOneAndUpdate(
-			{
-				buildingId,
-				alarmType,
-			},
+		const building = await this.buildingSchema
+			.findById(buildingId)
+			.select('_id companyId')
+			.lean()
+
+		if (!building) {
+			throw this.createError('Building not found', 404)
+		}
+
+		const gatewayQuery = {
+			buildingId,
+			isAssigned: true,
+		}
+
+		if (gatewayId) {
+			this.checkObjectId(gatewayId, 'gatewayId')
+			gatewayQuery._id = gatewayId
+		}
+
+		if (building.companyId) {
+			gatewayQuery.companyId = building.companyId
+		}
+
+		const gateways = await this.gatewaySchema
+			.find(gatewayQuery)
+			.select('_id serialNumber')
+			.lean()
+
+		const mqttResult = await sendAlarmLevelToGateways({
+			gateways,
+			alarmType,
+			green,
+			yellow,
+			red,
+			enabled,
+		})
+
+		if (mqttResult.summary.successCount === 0) {
+			const statusCode =
+				mqttResult.summary.timeoutCount === mqttResult.summary.total ? 504 : 400
+			const message =
+				statusCode === 504
+					? 'MQTT response timeout'
+					: 'Failed setting alarm level on all gateways'
+			const error = this.createError(message, statusCode)
+			error.data = {
+				gatewayResults: mqttResult.results,
+				summary: mqttResult.summary,
+			}
+			throw error
+		}
+
+		await this.saveGatewayAlarmSettings({
+			gatewayResults: mqttResult.results,
+			alarmType,
+			green,
+			yellow,
+			red,
+			enabled,
+			updatedBy,
+		})
+
+		const alarmLevel =
+			enabled === false
+				? null
+				: await this.alarmLevelSchema.findOneAndUpdate(
+						{
+							buildingId,
+							alarmType,
+						},
+						{
+							$set: {
+								green,
+								yellow,
+								red,
+							},
+							$setOnInsert: {
+								buildingId,
+								alarmType,
+							},
+						},
+						{
+							new: true,
+							upsert: true,
+							runValidators: true,
+						},
+					)
+
+		return {
+			alarmLevel,
+			gatewayResults: mqttResult.results,
+			summary: mqttResult.summary,
+		}
+	}
+
+	getGatewayAlarmSettingPath(alarmType) {
+		return alarmType === NODE_TYPE.ANGLE ? 'angle' : 'vertical'
+	}
+
+	async saveGatewayAlarmSettings({
+		gatewayResults,
+		alarmType,
+		green,
+		yellow,
+		red,
+		enabled,
+		updatedBy = null,
+	}) {
+		const settingPath = this.getGatewayAlarmSettingPath(alarmType)
+		const successResults = gatewayResults.filter(
+			result => result.status === 'success' && result.gatewayId,
+		)
+
+		await Promise.all(
+			successResults.map(result =>
+				this.gatewayAlarmSettingSchema.findOneAndUpdate(
+					{ gatewayId: result.gatewayId },
+					{
+						$set: {
+							gatewayId: result.gatewayId,
+							gatewaySerialNum: result.gatewaySerialNum,
+							updatedBy,
+							[`${settingPath}.alarmEnabled`]: enabled,
+							[`${settingPath}.alarmLevel1`]: enabled ? green : null,
+							[`${settingPath}.alarmLevel2`]: enabled ? yellow : null,
+							[`${settingPath}.alarmLevel3`]: enabled ? red : null,
+						},
+						$setOnInsert: {
+							[`${settingPath}.faultFilterNodes`]: [],
+						},
+					},
+					{
+						new: true,
+						upsert: true,
+						runValidators: true,
+					},
+				),
+			),
+		)
+	}
+
+	validateFaultFilterPayload({
+		buildingId,
+		gatewayId,
+		alarmType,
+		nodeNumber,
+		nodes,
+		enabled,
+	}) {
+		if (!mongoose.Types.ObjectId.isValid(buildingId)) {
+			throw this.createError('Invalid building id', 400)
+		}
+
+		this.checkObjectId(gatewayId, 'gatewayId')
+
+		if (!alarmType) {
+			throw this.createError('alarmType is required', 400)
+		}
+
+		if (!Object.values(ALARM_NODE_TYPES).includes(alarmType)) {
+			throw this.createError('Invalid alarm type', 400)
+		}
+
+		if (Array.isArray(nodes)) {
+			this.normalizeFaultFilterNodes(nodes)
+			return
+		}
+
+		if (typeof enabled !== 'boolean') {
+			throw this.createError('enabled is required', 400)
+		}
+
+		this.normalizeFaultFilterNodeNumber(nodeNumber)
+	}
+
+	normalizeFaultFilterNodeNumber(nodeNumber) {
+		const normalized = Number(nodeNumber)
+
+		if (
+			!Number.isInteger(normalized) ||
+			normalized < 1 ||
+			normalized > 9999
+		) {
+			throw this.createError('nodeNumber must be a valid node number', 400)
+		}
+
+		return normalized
+	}
+
+	normalizeFaultFilterNodes(nodes = []) {
+		if (!Array.isArray(nodes)) {
+			throw this.createError('nodes must be an array', 400)
+		}
+
+		return [
+			...new Set(
+				nodes.map(nodeNumber =>
+					this.normalizeFaultFilterNodeNumber(nodeNumber),
+				),
+			),
+		].sort((a, b) => a - b)
+	}
+
+	resolveFaultFilterNodes({ currentNodes, nodes, nodeNumber, enabled }) {
+		if (Array.isArray(nodes)) {
+			return this.normalizeFaultFilterNodes(nodes)
+		}
+
+		const normalizedNodeNumber =
+			this.normalizeFaultFilterNodeNumber(nodeNumber)
+		const nextNodes = new Set(this.normalizeFaultFilterNodes(currentNodes))
+
+		if (enabled) {
+			nextNodes.add(normalizedNodeNumber)
+		} else {
+			nextNodes.delete(normalizedNodeNumber)
+		}
+
+		return [...nextNodes].sort((a, b) => a - b)
+	}
+
+	async updateFaultFilter({
+		updatedBy = null,
+		buildingId,
+		gatewayId,
+		alarmType,
+		nodeNumber,
+		nodes,
+		enabled = true,
+	}) {
+		this.validateFaultFilterPayload({
+			buildingId,
+			gatewayId,
+			alarmType,
+			nodeNumber,
+			nodes,
+			enabled,
+		})
+
+		const building = await this.buildingSchema
+			.findById(buildingId)
+			.select('_id companyId')
+			.lean()
+
+		if (!building) {
+			throw this.createError('Building not found', 404)
+		}
+
+		const gatewayQuery = {
+			_id: gatewayId,
+			buildingId,
+			isAssigned: true,
+		}
+
+		if (building.companyId) {
+			gatewayQuery.companyId = building.companyId
+		}
+
+		const gateway = await this.gatewaySchema
+			.findOne(gatewayQuery)
+			.select('_id serialNumber')
+			.lean()
+
+		if (!gateway) {
+			throw this.createError('Gateway not found', 404)
+		}
+
+		const settingPath = this.getGatewayAlarmSettingPath(alarmType)
+		const currentSetting = await this.gatewayAlarmSettingSchema
+			.findOne({ gatewayId })
+			.lean()
+		const currentNodes =
+			currentSetting?.[settingPath]?.faultFilterNodes || []
+		const faultFilterNodes = this.resolveFaultFilterNodes({
+			currentNodes,
+			nodes,
+			nodeNumber,
+			enabled,
+		})
+
+		const mqttResult = await sendFaultFilterToGateway({
+			gateway,
+			alarmType,
+			nodes: faultFilterNodes,
+		})
+
+		if (mqttResult.summary.successCount === 0) {
+			const statusCode =
+				mqttResult.summary.timeoutCount === mqttResult.summary.total ? 504 : 400
+			const message =
+				statusCode === 504
+					? 'MQTT response timeout'
+					: 'Failed setting fault filter on gateway'
+			const error = this.createError(message, statusCode)
+			error.data = {
+				gatewayResults: mqttResult.results,
+				summary: mqttResult.summary,
+			}
+			throw error
+		}
+
+		await this.gatewayAlarmSettingSchema.findOneAndUpdate(
+			{ gatewayId },
 			{
 				$set: {
-					green,
-					yellow,
-					red,
-				},
-				$setOnInsert: {
-					buildingId,
-					alarmType,
+					gatewayId,
+					gatewaySerialNum: gateway.serialNumber,
+					updatedBy,
+					[`${settingPath}.faultFilterNodes`]: faultFilterNodes,
 				},
 			},
 			{
@@ -943,7 +1273,11 @@ class AdminBuildingsService {
 			},
 		)
 
-		return alarmLevel
+		return {
+			faultFilterNodes,
+			gatewayResults: mqttResult.results,
+			summary: mqttResult.summary,
+		}
 	}
 }
 
