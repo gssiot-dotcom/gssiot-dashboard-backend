@@ -4,6 +4,7 @@ const { logger } = require('../../lib/logger')
 const { NODE_TYPE } = require('../../lib/config')
 
 const ALARM_LEVEL_SET_CMD = 4
+const FAULT_FILTER_SET_CMD = 5
 const MQTT_TIMEOUT_MS = 10000
 const GATEWAY_SERIAL_PREFIX = 'GRM22JU22P'
 
@@ -50,6 +51,25 @@ function resolveAlarmNodeType(alarmType) {
 	return nodeType
 }
 
+function normalizeNodeNumbers(nodes) {
+	if (!Array.isArray(nodes)) {
+		throw createError('nodes must be an array', 400)
+	}
+
+	const normalized = nodes.map(Number)
+
+	if (
+		normalized.some(
+			nodeNumber =>
+				!Number.isInteger(nodeNumber) || nodeNumber < 1 || nodeNumber > 9999,
+		)
+	) {
+		throw createError('nodes must contain valid node numbers', 400)
+	}
+
+	return [...new Set(normalized)].sort((a, b) => a - b)
+}
+
 function isSuccessResponse(data) {
 	return (
 		data?.resp === 'success' ||
@@ -61,7 +81,7 @@ function isSuccessResponse(data) {
 }
 
 async function publishAsync(topic, payload) {
-	logger('Publishing alarm level to MQTT:', { topic, payload })
+	logger('Publishing gateway command to MQTT:', { topic, payload })
 
 	const mqttClient = getMqttClient()
 
@@ -100,7 +120,7 @@ function waitForGatewayCommandResponse({
 			const data = payload?.data || {}
 			if (Number(data?.cmd) !== cmd) return
 
-			logger('Received alarm level MQTT response:', {
+			logger('Received gateway command MQTT response:', {
 				gw_number: payload.gw_number,
 				data,
 			})
@@ -213,6 +233,81 @@ async function sendAlarmLevelToGateways({
 	}
 }
 
+async function sendFaultFilterToGateway({
+	gateway,
+	alarmType,
+	nodes,
+	timeoutMs = MQTT_TIMEOUT_MS,
+}) {
+	if (!gateway) {
+		throw createError('Gateway is required', 404)
+	}
+
+	const gatewayId = gateway._id?.toString() || gateway.id?.toString() || null
+	const gatewaySerialNum = gateway.serialNumber
+	const topic = buildGatewayTopic(gatewaySerialNum)
+	const nodeType = resolveAlarmNodeType(alarmType)
+	const faultFilterNodes = normalizeNodeNumbers(nodes)
+	const payload = {
+		cmd: FAULT_FILTER_SET_CMD,
+		nodeType,
+		numNodes: faultFilterNodes.length,
+		nodes: faultFilterNodes,
+	}
+	const waitPromise = waitForGatewayCommandResponse({
+		serialNumber: gatewaySerialNum,
+		cmd: FAULT_FILTER_SET_CMD,
+		timeoutMs,
+	})
+
+	try {
+		await publishAsync(topic, payload)
+		const response = await waitPromise
+
+		const result = {
+			gatewayId,
+			gatewaySerialNum,
+			status: 'success',
+			message: 'success',
+			response,
+		}
+
+		return {
+			cmd: FAULT_FILTER_SET_CMD,
+			payload,
+			results: [result],
+			summary: {
+				total: 1,
+				successCount: 1,
+				errorCount: 0,
+				timeoutCount: 0,
+			},
+		}
+	} catch (error) {
+		waitPromise.catch(() => {})
+
+		const result = {
+			gatewayId,
+			gatewaySerialNum,
+			status: error?.statusCode === 504 ? 'timeout' : 'error',
+			message: error?.message || 'Failed setting fault filter on gateway',
+		}
+
+		return {
+			cmd: FAULT_FILTER_SET_CMD,
+			payload,
+			results: [result],
+			summary: {
+				total: 1,
+				successCount: 0,
+				errorCount: result.status === 'error' ? 1 : 0,
+				timeoutCount: result.status === 'timeout' ? 1 : 0,
+			},
+		}
+	}
+}
+
 module.exports = {
 	sendAlarmLevelToGateways,
+	sendFaultFilterToGateway,
 }

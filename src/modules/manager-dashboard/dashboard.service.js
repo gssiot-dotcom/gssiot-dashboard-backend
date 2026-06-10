@@ -25,6 +25,7 @@ const bcryptjs = require('bcryptjs')
 const { UserSchema } = require('../users/user.model')
 const {
 	sendAlarmLevelToGateways,
+	sendFaultFilterToGateway,
 } = require('../building/alarm-level-mqtt.helper')
 
 class ManagerDashboardService {
@@ -1101,6 +1102,181 @@ class ManagerDashboardService {
 				),
 			),
 		)
+	}
+
+	validateFaultFilterPayload({
+		buildingId,
+		gatewayId,
+		alarmType,
+		nodeNumber,
+		nodes,
+		enabled,
+	}) {
+		if (!mongoose.Types.ObjectId.isValid(buildingId)) {
+			throw this.createError('Invalid building id', 400)
+		}
+
+		this.checkObjectId(gatewayId, 'gatewayId')
+
+		if (!alarmType) {
+			throw this.createError('alarmType is required', 400)
+		}
+
+		if (!Object.values(ALARM_NODE_TYPES).includes(alarmType)) {
+			throw this.createError('Invalid alarm type', 400)
+		}
+
+		if (Array.isArray(nodes)) {
+			this.normalizeFaultFilterNodes(nodes)
+			return
+		}
+
+		if (typeof enabled !== 'boolean') {
+			throw this.createError('enabled is required', 400)
+		}
+
+		this.normalizeFaultFilterNodeNumber(nodeNumber)
+	}
+
+	normalizeFaultFilterNodeNumber(nodeNumber) {
+		const normalized = Number(nodeNumber)
+
+		if (
+			!Number.isInteger(normalized) ||
+			normalized < 1 ||
+			normalized > 9999
+		) {
+			throw this.createError('nodeNumber must be a valid node number', 400)
+		}
+
+		return normalized
+	}
+
+	normalizeFaultFilterNodes(nodes = []) {
+		if (!Array.isArray(nodes)) {
+			throw this.createError('nodes must be an array', 400)
+		}
+
+		return [
+			...new Set(
+				nodes.map(nodeNumber =>
+					this.normalizeFaultFilterNodeNumber(nodeNumber),
+				),
+			),
+		].sort((a, b) => a - b)
+	}
+
+	resolveFaultFilterNodes({ currentNodes, nodes, nodeNumber, enabled }) {
+		if (Array.isArray(nodes)) {
+			return this.normalizeFaultFilterNodes(nodes)
+		}
+
+		const normalizedNodeNumber =
+			this.normalizeFaultFilterNodeNumber(nodeNumber)
+		const nextNodes = new Set(this.normalizeFaultFilterNodes(currentNodes))
+
+		if (enabled) {
+			nextNodes.add(normalizedNodeNumber)
+		} else {
+			nextNodes.delete(normalizedNodeNumber)
+		}
+
+		return [...nextNodes].sort((a, b) => a - b)
+	}
+
+	async updateFaultFilter({
+		userId,
+		buildingId,
+		gatewayId,
+		alarmType,
+		nodeNumber,
+		nodes,
+		enabled = true,
+	}) {
+		this.validateFaultFilterPayload({
+			buildingId,
+			gatewayId,
+			alarmType,
+			nodeNumber,
+			nodes,
+			enabled,
+		})
+
+		const { companyId } = await this.checkManagerBuilding({
+			userId,
+			buildingId,
+		})
+
+		const gateway = await this.gatewaySchema
+			.findOne({
+				_id: gatewayId,
+				companyId,
+				buildingId,
+				isAssigned: true,
+			})
+			.select('_id serialNumber')
+			.lean()
+
+		if (!gateway) {
+			throw this.createError('Gateway not found', 404)
+		}
+
+		const settingPath = this.getGatewayAlarmSettingPath(alarmType)
+		const currentSetting = await this.gatewayAlarmSettingSchema
+			.findOne({ gatewayId })
+			.lean()
+		const currentNodes =
+			currentSetting?.[settingPath]?.faultFilterNodes || []
+		const faultFilterNodes = this.resolveFaultFilterNodes({
+			currentNodes,
+			nodes,
+			nodeNumber,
+			enabled,
+		})
+
+		const mqttResult = await sendFaultFilterToGateway({
+			gateway,
+			alarmType,
+			nodes: faultFilterNodes,
+		})
+
+		if (mqttResult.summary.successCount === 0) {
+			const statusCode =
+				mqttResult.summary.timeoutCount === mqttResult.summary.total ? 504 : 400
+			const message =
+				statusCode === 504
+					? 'MQTT response timeout'
+					: 'Failed setting fault filter on gateway'
+			const error = this.createError(message, statusCode)
+			error.data = {
+				gatewayResults: mqttResult.results,
+				summary: mqttResult.summary,
+			}
+			throw error
+		}
+
+		await this.gatewayAlarmSettingSchema.findOneAndUpdate(
+			{ gatewayId },
+			{
+				$set: {
+					gatewayId,
+					gatewaySerialNum: gateway.serialNumber,
+					updatedBy: userId,
+					[`${settingPath}.faultFilterNodes`]: faultFilterNodes,
+				},
+			},
+			{
+				new: true,
+				upsert: true,
+				runValidators: true,
+			},
+		)
+
+		return {
+			faultFilterNodes,
+			gatewayResults: mqttResult.results,
+			summary: mqttResult.summary,
+		}
 	}
 }
 

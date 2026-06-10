@@ -751,6 +751,31 @@ adminDashboardController.updateAlarmLevel = async (req, res, next) => {
 	}
 }
 
+adminDashboardController.updateFaultFilter = async (req, res, next) => {
+	try {
+		const { buildingId } = req.params
+		const { alarmType, gatewayId, nodeNumber, enabled, nodes } = req.body
+
+		const result = await adminCompanyBuildingsService.updateFaultFilter({
+			updatedBy: req.user?._id || null,
+			buildingId,
+			gatewayId,
+			alarmType,
+			nodeNumber,
+			enabled,
+			nodes,
+		})
+
+		return sendSuccess(res, {
+			message: 'Fault filter updated successfully',
+			data: result,
+			statusCode: 200,
+		})
+	} catch (error) {
+		return sendFail(res, error)
+	}
+}
+
 // ========= Admin All Devices page controllers ==========
 adminDashboardController.getAdminAllGateways = async (req, res) => {
 	try {

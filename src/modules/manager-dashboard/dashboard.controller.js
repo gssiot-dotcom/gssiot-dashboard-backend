@@ -299,6 +299,31 @@ managerDashboardController.updateAlarmLevel = async (req, res, next) => {
 	}
 }
 
+managerDashboardController.updateFaultFilter = async (req, res, next) => {
+	try {
+		const { buildingId } = req.params
+		const { alarmType, gatewayId, nodeNumber, enabled, nodes } = req.body
+
+		const result = await managerDashboardService.updateFaultFilter({
+			userId: req.user._id,
+			buildingId,
+			gatewayId,
+			alarmType,
+			nodeNumber,
+			enabled,
+			nodes,
+		})
+
+		return sendSuccess(res, {
+			message: 'Fault filter updated successfully',
+			data: result,
+			statusCode: 200,
+		})
+	} catch (error) {
+		return sendFail(res, error)
+	}
+}
+
 // ================= Manager uploading images on AWS controller =============== //
 managerDashboardController.getManagerPresignedUrl = async (req, res) => {
 	try {
