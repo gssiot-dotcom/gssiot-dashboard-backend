@@ -15,6 +15,7 @@ exports.NODE_TYPE = {
 ;((exports.NODE_STATUS = 'safe' | 'caution'), 'warning' | 'danger' | 'offline')
 
 exports.ALARM_NODE_TYPES = {
+	DOOR: 'door_node',
 	ANGLE: 'angle_node',
 	GANGFORM: 'gangform_node',
 }
