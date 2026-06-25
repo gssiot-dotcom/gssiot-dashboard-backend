@@ -118,6 +118,10 @@ const gatewayAlarmSettingSchema = new mongoose.Schema(
 			default: null,
 			trim: true,
 		},
+		door: {
+			type: gatewayAlarmNodeSettingSchema,
+			default: () => ({}),
+		},
 		angle: {
 			type: gatewayAlarmNodeSettingSchema,
 			default: () => ({}),

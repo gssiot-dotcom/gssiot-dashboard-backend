@@ -38,6 +38,7 @@ function buildGatewayTopic(serialNumber) {
 
 function resolveAlarmNodeType(alarmType) {
 	const nodeTypeMap = {
+		[NODE_TYPE.DOOR]: 0,
 		[NODE_TYPE.ANGLE]: 1,
 		[NODE_TYPE.GANGFORM]: 2,
 	}
@@ -158,22 +159,30 @@ async function sendAlarmLevelToGateways({
 	}
 
 	const nodeType = resolveAlarmNodeType(alarmType)
-	const payload = enabled
+	const isDoorAlarm = nodeType === 0
+	const payload = isDoorAlarm
 		? {
 				cmd: ALARM_LEVEL_SET_CMD,
 				nodeType,
+				alarmEnabled: Boolean(enabled),
 				enabled: true,
-				alarmEnabled: true,
-				alarmLevel1: green,
-				alarmLevel2: yellow,
-				alarmLevel3: red,
 			}
-		: {
-				cmd: ALARM_LEVEL_SET_CMD,
-				nodeType,
-				enabled: false,
-				alarmEnabled: false,
-			}
+		: enabled
+			? {
+					cmd: ALARM_LEVEL_SET_CMD,
+					nodeType,
+					enabled: true,
+					alarmEnabled: true,
+					alarmLevel1: green,
+					alarmLevel2: yellow,
+					alarmLevel3: red,
+				}
+			: {
+					cmd: ALARM_LEVEL_SET_CMD,
+					nodeType,
+					enabled: false,
+					alarmEnabled: false,
+				}
 
 	const results = await Promise.all(
 		gateways.map(async gateway => {

@@ -908,6 +908,8 @@ class AdminBuildingsService {
 
 		if (enabled === false) return
 
+		if (alarmType === NODE_TYPE.DOOR) return
+
 		const values = { green, yellow, red }
 		const ALARM_MAX_DEGREE = 12
 
@@ -1051,6 +1053,7 @@ class AdminBuildingsService {
 	}
 
 	getGatewayAlarmSettingPath(alarmType) {
+		if (alarmType === NODE_TYPE.DOOR) return 'door'
 		return alarmType === NODE_TYPE.ANGLE ? 'angle' : 'vertical'
 	}
 
