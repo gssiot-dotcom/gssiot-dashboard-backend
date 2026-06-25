@@ -165,6 +165,7 @@ async function sendAlarmLevelToGateways({
 				cmd: ALARM_LEVEL_SET_CMD,
 				nodeType,
 				alarmEnabled: Boolean(enabled),
+				enabled: true,
 			}
 		: enabled
 			? {
@@ -176,12 +177,12 @@ async function sendAlarmLevelToGateways({
 					alarmLevel2: yellow,
 					alarmLevel3: red,
 				}
-		: {
-				cmd: ALARM_LEVEL_SET_CMD,
-				nodeType,
-				enabled: false,
-				alarmEnabled: false,
-			}
+			: {
+					cmd: ALARM_LEVEL_SET_CMD,
+					nodeType,
+					enabled: false,
+					alarmEnabled: false,
+				}
 
 	const results = await Promise.all(
 		gateways.map(async gateway => {
