@@ -10,5 +10,6 @@ const router = express.Router()
 router.post('/company/upload-url', assetController.createUploadUrl)
 router.post('/company/save', assetController.saveAsset)
 router.post('/company/remove', assetController.removeAsset)
+router.post('/company/reorder', assetController.reorderBuildingImages)
 
 module.exports = router

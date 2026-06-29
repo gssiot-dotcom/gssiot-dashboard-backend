@@ -74,14 +74,32 @@ async function removeAsset(req, res, next) {
 	}
 }
 
-module.exports = {
-	createUploadUrl,
-	saveAsset,
-	removeAsset,
+async function reorderBuildingImages(req, res, next) {
+	try {
+		const { kind, companyId, buildingId, keys } = req.body
+
+		if (!kind || !companyId || !buildingId || !Array.isArray(keys)) {
+			return res.status(400).json({
+				message: 'kind, companyId, buildingId, keys are required',
+			})
+		}
+
+		const result = await assetService.reorderBuildingImagesInDb({
+			kind,
+			companyId,
+			buildingId,
+			keys,
+		})
+
+		return res.status(200).json(result)
+	} catch (error) {
+		next(error)
+	}
 }
 
 module.exports = {
 	createUploadUrl,
 	saveAsset,
 	removeAsset,
+	reorderBuildingImages,
 }
