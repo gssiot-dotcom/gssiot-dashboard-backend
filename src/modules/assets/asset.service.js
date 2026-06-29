@@ -6,6 +6,7 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner')
 const { s3Client, s3Bucket } = require('../../config/s3.config')
 const { CompanySchema } = require('../../modules/company/company.model')
 const { BuildingSchema } = require('../../modules/building/building.model')
+const NodeSchema = require('../../modules/nodes/node.model')
 
 const ALLOWED_CONTENT_TYPES = [
 	'image/jpeg',
@@ -120,6 +121,79 @@ function validateKeyPrefix({ kind, companyId, buildingId, key }) {
 	}
 
 	throw createAppError('Invalid asset kind', 400)
+}
+
+function getBuildingImageField(kind) {
+	if (kind === 'buildingPlanImage') return 'buildingPlanImage'
+	if (kind === 'buildingRealImage') return 'buildingRealImage'
+	throw createAppError('Invalid building image kind', 400)
+}
+
+async function remapPlanImageNodeIndexes({ buildingId, indexMap }) {
+	const fromIndexes = Object.keys(indexMap).map(Number)
+
+	if (!fromIndexes.length) return
+
+	const nodes = await NodeSchema.find({
+		buildingId,
+		'installedLocation.planImageIndex': { $in: fromIndexes },
+	})
+		.select('_id installedLocation.planImageIndex')
+		.lean()
+
+	const operations = nodes
+		.map(node => {
+			const currentIndex = node.installedLocation?.planImageIndex
+			const nextIndex = indexMap[currentIndex]
+
+			if (typeof nextIndex !== 'number') return null
+
+			return {
+				updateOne: {
+					filter: { _id: node._id },
+					update: {
+						$set: {
+							'installedLocation.planImageIndex': nextIndex,
+						},
+					},
+				},
+			}
+		})
+		.filter(Boolean)
+
+	if (operations.length) {
+		await NodeSchema.bulkWrite(operations)
+	}
+}
+
+async function shiftPlanImageNodeIndexesAfterDelete({ buildingId, removedIndex }) {
+	if (removedIndex < 0) return
+
+	await NodeSchema.updateMany(
+		{
+			buildingId,
+			'installedLocation.planImageIndex': removedIndex,
+		},
+		{
+			$set: {
+				'installedLocation.planImageIndex': null,
+				'installedLocation.xPercent': null,
+				'installedLocation.yPercent': null,
+			},
+		},
+	)
+
+	await NodeSchema.updateMany(
+		{
+			buildingId,
+			'installedLocation.planImageIndex': { $gt: removedIndex },
+		},
+		{
+			$inc: {
+				'installedLocation.planImageIndex': -1,
+			},
+		},
+	)
 }
 
 async function createPresignedPutUrl(payload) {
@@ -240,9 +314,13 @@ async function removeAssetFromDb({ kind, companyId, buildingId, key }) {
 	}
 
 	if (kind === 'buildingPlanImage') {
+		const removedIndex = building.buildingPlanImage.indexOf(key)
+
 		building.buildingPlanImage = building.buildingPlanImage.filter(
 			item => item !== key,
 		)
+
+		await shiftPlanImageNodeIndexesAfterDelete({ buildingId, removedIndex })
 	}
 
 	if (kind === 'buildingRealImage') {
@@ -250,6 +328,63 @@ async function removeAssetFromDb({ kind, companyId, buildingId, key }) {
 			item => item !== key,
 		)
 	}
+
+	await building.save()
+
+	return building
+}
+
+async function reorderBuildingImagesInDb({ kind, companyId, buildingId, keys }) {
+	if (!Array.isArray(keys)) {
+		throw createAppError('keys must be an array', 400)
+	}
+
+	if (keys.length > 4) {
+		throw createAppError('Maximum 4 images are allowed', 400)
+	}
+
+	if (new Set(keys).size !== keys.length) {
+		throw createAppError('Duplicate image keys are not allowed', 400)
+	}
+
+	const field = getBuildingImageField(kind)
+
+	keys.forEach(key => validateKeyPrefix({ kind, companyId, buildingId, key }))
+
+	const building = await BuildingSchema.findOne({
+		_id: buildingId,
+		companyId,
+	})
+
+	if (!building) {
+		throw createAppError('Building not found', 404)
+	}
+
+	const currentKeys = building[field]
+	const currentSet = new Set(currentKeys)
+
+	if (
+		currentKeys.length !== keys.length ||
+		keys.some(key => !currentSet.has(key))
+	) {
+		throw createAppError('Image keys must match the existing image list', 400)
+	}
+
+	if (kind === 'buildingPlanImage') {
+		const indexMap = {}
+
+		currentKeys.forEach((key, oldIndex) => {
+			const nextIndex = keys.indexOf(key)
+
+			if (nextIndex !== oldIndex) {
+				indexMap[oldIndex] = nextIndex
+			}
+		})
+
+		await remapPlanImageNodeIndexes({ buildingId, indexMap })
+	}
+
+	building[field] = keys
 
 	await building.save()
 
@@ -275,5 +410,6 @@ module.exports = {
 	createPresignedPutUrl,
 	saveAssetToDb,
 	removeAssetFromDb,
+	reorderBuildingImagesInDb,
 	deleteObjectFromS3,
 }

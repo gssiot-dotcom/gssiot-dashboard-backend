@@ -19,6 +19,7 @@ const {
 	getManagerPresignedUrl,
 	saveManagerAsset,
 	removeManagerAsset,
+	reorderManagerBuildingImages,
 	updateManagerBuildingWorkers,
 	getMyCompany,
 	updateAlarmLevel,
@@ -55,5 +56,6 @@ router.patch('/buildings/:buildingId/fault-filter', updateFaultFilter)
 router.post('/assets/presigned-url', getManagerPresignedUrl)
 router.post('/assets/save', saveManagerAsset)
 router.post('/assets/remove', removeManagerAsset)
+router.post('/assets/reorder', reorderManagerBuildingImages)
 
 module.exports = router

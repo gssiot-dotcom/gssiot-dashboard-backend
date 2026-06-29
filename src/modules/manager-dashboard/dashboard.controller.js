@@ -3,6 +3,7 @@ const { logger, logError } = require('../../lib/logger')
 const {
 	saveAssetToDb,
 	removeAssetFromDb,
+	reorderBuildingImagesInDb,
 	deleteObjectFromS3,
 	createPresignedPutUrl,
 } = require('../assets/asset.service')
@@ -402,6 +403,33 @@ managerDashboardController.removeManagerAsset = async (req, res) => {
 		return sendSuccess(res, {
 			message: 'Asset removed successfully',
 			data: { deleted: true },
+			statusCode: 200,
+		})
+	} catch (error) {
+		return sendFail(res, error)
+	}
+}
+
+managerDashboardController.reorderManagerBuildingImages = async (req, res) => {
+	try {
+		const { kind, buildingId, keys, companyId } = req.body
+
+		const membership =
+			await managerDashboardService.getAuthorizedManagerMembership({
+				userId: req.user._id,
+				companyId,
+			})
+
+		const data = await reorderBuildingImagesInDb({
+			kind,
+			companyId: membership.companyId,
+			buildingId,
+			keys,
+		})
+
+		return sendSuccess(res, {
+			message: 'Building images reordered successfully',
+			data,
 			statusCode: 200,
 		})
 	} catch (error) {
